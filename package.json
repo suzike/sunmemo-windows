@@ -1,7 +1,7 @@
 {
   "name": "sunmemo-windows",
   "productName": "SunMemo",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "\u628a\u672a\u5b8c\u6210\u7684\u60f3\u6cd5\u4e0e\u5f85\u529e\uff0c\u667e\u5728\u684c\u9762\u9633\u5149\u4e0b \u2014 SunMemo Windows \u7248",
   "main": "main.js",
   "author": "km-open-lab (Windows port)",

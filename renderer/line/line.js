@@ -255,19 +255,6 @@ function renderCardContent(s) {
     // Alt/Shift 手势（重排/撕下）在 mousedown 时动态关掉 draggable 走旧管线。
     face.draggable = true;
     face.addEventListener('dragstart', ev => {
-      // 方向仲裁：横向意图 = 平移绳（取消文本拖拽交回管线）；纵向 = 文本拖出
-      const ddx = dragState && dragState.x0 != null ? ev.screenX - dragState.x0 : 0;
-      const ddy = dragState && dragState.y0 != null ? ev.screenY - dragState.y0 : 0;
-      if (Math.abs(ddx) > Math.abs(ddy)) {
-        ev.preventDefault();
-        if (track && track.maxScroll > 0) {
-          dragState.panning = true;
-          dragState.panFrom = scrollX;
-          dragState.panX0 = ev.screenX;
-          document.body.classList.add('panning');
-        }
-        return;
-      }
       if (!item.memo || !item.memo.text) { ev.preventDefault(); return; }
       ev.dataTransfer.setData('text/plain', item.memo.text);
       ev.dataTransfer.effectAllowed = 'copyMove';
@@ -828,18 +815,10 @@ function mousemoveWork(ev) {
         dragState.slotEl.classList.add('reordering');
         document.body.classList.add('reordering');
       }
-      else if (track && track.maxScroll > 0 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-        // 横向主导 → 平移绳（轴锁），代替原生文件拖出；纵向仍可拖出文件
-        dragState.panning = true;
-        dragState.panFrom = scrollX;
-        dragState.panX0 = ev.screenX;
-        document.body.classList.add('panning');
+      else if ((() => { const ds = dragState.id && slots.get(dragState.id); return ds && ds.item && ds.item.kind === 'memo'; })()) {
+        // 便签：HTML5 文本拖出（dragstart 已带 text/plain）——拖进聊天框直接发文字
       }
-      else if (s && s.item && s.item.kind === 'memo') {
-        // 便签：纵向交给 HTML5 文本拖出（dragstart 方向仲裁已带 text/plain）；
-        // 横向已被 dragstart 取消并转入上面的 pan 分支。
-      }
-      else startDrag(dragState.id); // plain drag = native file drag (drop into chat apps etc.)
+      else startDrag(dragState.id); // 图片/文档：原生文件拖出（拖进聊天框发文件）
       if (!dragState.reordering && !dragState.tearing && !dragState.panning) clearPress();
     }
     if (dragState && dragState.reordering && !dragState.reorderDone) {
