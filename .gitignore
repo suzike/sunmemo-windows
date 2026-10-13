@@ -12,3 +12,13 @@ config.json.bak
 _docs/
 _shots/
 _e2e-result.json
+_*.mjs
+_*.py
+_*.js
+_*.md
+_reference/
+_perf*.log
+_thumb-trace.log
+_boot.log
+_trace.log
+_perf*.log

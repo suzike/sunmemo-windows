@@ -104,7 +104,10 @@ npm run demo     # 启动并注入演示数据
 npm start -- --test          # 状态机自测 19 项
 node scripts-e2e.mjs         # 端到端 26 项（需应用运行中）
 node tools/mem-baseline.mjs  # 内存基线采样
+node tests/smoke.mjs         # 功能冒烟（文档卡/滚动/拖文本，需 demo 实例）
 ```
+
+专项门禁（`tests/`）：`retract`（展开收回）· `dualmode`（扇面/滚动双模式）· `pdf-pages`（PDF 全页懒渲染）· `dragout-real`（真实光标拖出）· `live-gate`（悬停放大/回收站/缩略图自愈）· `fun-pack`（趣味四件套）· `peek-swap`（阅读面板串台）· `beacon-drop`（信标投递）。
 
 每次发版前跑完全部自检与端到端用例；交互类功能（悬停放大、回收站等）以真实光标注入复测后才交付。
 

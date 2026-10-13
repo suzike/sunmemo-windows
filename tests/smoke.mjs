@@ -4,7 +4,7 @@
 import { execSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import fs from 'node:fs';
-execSync('python _gen-docs.py && python _gen-docx.py', { cwd: process.cwd(), stdio: 'ignore' });
+execSync('python tests/gen-docs.py && python tests/gen-docx.py', { cwd: process.cwd(), stdio: 'ignore' });
 const E = String.fromCharCode(92);
 const APP = ['E:', 'Agentic_Engineering', 'ZCode', 'sunidea'].join(E);
 const DOCS = APP + E + '_docs';
