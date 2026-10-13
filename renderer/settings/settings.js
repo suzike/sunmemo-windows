@@ -52,6 +52,21 @@ api.invoke('settings:data').then(d => {
   themeRow.appendChild(pick);
   document.getElementById('chkSound').checked = d.settings.soundOn;
   document.getElementById('chkImgZoom').checked = d.settings.imgZoom !== false;
+  // 晾衣绳位置：跟随鼠标 / 固定某块显示器
+  (async () => {
+    try {
+      const displays = await api.invoke('displays:list');
+      const sel = document.getElementById('selDisplay');
+      const cur = d.settings.displayMode || 'follow';
+      for (const d2 of displays) {
+        const opt = document.createElement('option');
+        opt.value = d2.id;
+        opt.textContent = '固定在 ' + d2.label;
+        sel.appendChild(opt);
+      }
+      sel.value = cur === 'follow' || displays.some(x => x.id === cur) ? cur : 'follow';
+    } catch { /* 列表失败时保留跟随选项 */ }
+  })();
   document.getElementById('chkPower').checked = !!d.settings.powerSave;
   document.getElementById('chkWind').checked = !!d.settings.wind;
   document.getElementById('chkGpu').checked = d.settings.gpuSoftware !== true;
@@ -135,6 +150,7 @@ window.addEventListener('keydown', ev => {
 });
 
 document.getElementById('chkAutoHang').addEventListener('change', e => api.send('settings:set', { key: 'autoHang', value: e.target.checked }));
+document.getElementById('selDisplay').addEventListener('change', e => api.send('settings:set', { key: 'displayMode', value: e.target.value }));
 document.getElementById('chkSound').addEventListener('change', e => api.send('settings:set', { key: 'soundOn', value: e.target.checked }));
 document.getElementById('chkImgZoom').addEventListener('change', e => api.send('settings:set', { key: 'imgZoom', value: e.target.checked }));
 document.getElementById('chkPower').addEventListener('change', e => api.send('settings:set', { key: 'powerSave', value: e.target.checked }));

@@ -255,6 +255,19 @@ function renderCardContent(s) {
     // Alt/Shift 手势（重排/撕下）在 mousedown 时动态关掉 draggable 走旧管线。
     face.draggable = true;
     face.addEventListener('dragstart', ev => {
+      // 方向仲裁：横向意图 = 平移绳（取消文本拖拽交回管线）；纵向 = 文本拖出
+      const ddx = dragState && dragState.x0 != null ? ev.screenX - dragState.x0 : 0;
+      const ddy = dragState && dragState.y0 != null ? ev.screenY - dragState.y0 : 0;
+      if (Math.abs(ddx) > Math.abs(ddy)) {
+        ev.preventDefault();
+        if (track && track.maxScroll > 0) {
+          dragState.panning = true;
+          dragState.panFrom = scrollX;
+          dragState.panX0 = ev.screenX;
+          document.body.classList.add('panning');
+        }
+        return;
+      }
       if (!item.memo || !item.memo.text) { ev.preventDefault(); return; }
       ev.dataTransfer.setData('text/plain', item.memo.text);
       ev.dataTransfer.effectAllowed = 'copyMove';
@@ -370,14 +383,18 @@ function computeTrack(items, width) {
   const natural = L.dynamicSpacing(1, width);
   const widths = items.map(ropeWidthOf);
   const addW = L.RATIOS.wide.rope.w;
+  const discW = 184; // 每日发现卡实际宽度（与 .disc-holder 一致）
   const need = TRACK_MARGIN + widths.reduce((a, b) => a + b, 0)
     + TRACK_GAP * Math.max(0, items.length - 1) + TRACK_GAP + addW + TRACK_MARGIN;
   if (need <= width - 8) return null; // 装得下 → 保持现行居中布局（scrollX=0）
   const map = new Map();
   let acc = TRACK_MARGIN;
   items.forEach((it, i) => { map.set(it.id, acc + widths[i] / 2); acc += widths[i] + TRACK_GAP; });
-  const contentW = acc + addW + TRACK_MARGIN;
-  return { map, addX: acc + addW / 2, contentW, maxScroll: Math.max(0, contentW - width) };
+  // 每日发现卡：添加卡左侧（计入轨道几何——可达、不重叠、不消失）
+  const discX = acc + discW / 2;
+  const addX = acc + discW + TRACK_GAP + addW / 2;
+  const contentW = acc + discW + TRACK_GAP + addW + TRACK_MARGIN;
+  return { map, addX, discX, contentW, maxScroll: Math.max(0, contentW - width) };
 }
 function clampScroll(x) { return Math.max(0, Math.min(track ? track.maxScroll : 0, x)); }
 function slotScreenX(item, index, total, width) {
@@ -385,21 +402,25 @@ function slotScreenX(item, index, total, width) {
   return { x, sx: x - scrollX };
 }
 function placeRopeTops(items) {
-  // 卡片 top 跟随绳的垂曲线（按屏幕 x 取 ropeY）——平移时沿绳浪滑动
-  const total = items.length + 1;
+  const total = items.length + 2; // 与 layout() 同一序列
   items.forEach((item, index) => {
-    const s = slots.get(item.id);
-    if (!s) return;
+    const s2 = slots.get(item.id);
+    if (!s2) return;
     const x = track ? track.map.get(item.id) : L.xAt(index, total, width);
     const ry = L.ropeY(x - scrollX, width);
-    s.el.style.top = (ry - L.PIN_ABOVE) + 'px';
+    s2.el.style.top = (ry - L.PIN_ABOVE) + 'px';
   });
   if (addSlotEl) {
-    const x = track ? track.addX : L.xAt(items.length, total, width);
+    const x = track ? track.addX : L.xAt(items.length + 1, total, width);
     const ry = L.ropeY(x - scrollX, width);
     addSlotEl.style.top = (ry - L.PIN_ABOVE) + 'px';
   }
-  if (typeof updateDiscover === 'function') updateDiscover();
+  if (typeof updateDiscover === 'function') updateDiscover(); // 创建 + 定位（开机首帧必须调用）
+  if (discoverSlotEl) {
+    const x = track ? track.discX : L.xAt(items.length, items.length + 2, width);
+    const ry = L.ropeY(x - scrollX, width);
+    discoverSlotEl.style.top = (ry - L.PIN_ABOVE) + 'px';
+  }
   if (typeof attachSeed === 'function') {
     const seed = document.getElementById('ropeSeed');
     if (seed) { seed.style.left = Math.round(width - 58) + 'px'; seed.style.top = Math.round(L.ropeY(width - 58, width) - 14) + 'px'; }
@@ -486,7 +507,7 @@ function layout() {
   if (document.body.classList.contains('sw') && L.setSoftwareMode) L.setSoftwareMode(true);
   width = window.innerWidth;
   const items = state.items;
-  const total = items.length + 1;
+  const total = items.length + 2; // 统一序列：items + 每日发现卡 + 添加卡
   const hIdx = items.findIndex(i => i.id === hoveredId);
   drawRope();
   // R154: id 序列未变、宽度未变、无 hover peek 且无 flying/falling 在途时跳过
@@ -568,7 +589,7 @@ function layout() {
   prevIds = new Set(items.map(i => i.id));
   placeRopeTops(items);
   cardsEl.style.transform = 'translateX(' + (-Math.round(scrollX)) + 'px)';
-  updateAddCard(total, hIdx, items.length);
+  updateAddCard(total, hIdx, items.length + 1);
   updateWelcomeCard(items.length);
   updateScrollUI();
   reportHitRects();
@@ -815,8 +836,8 @@ function mousemoveWork(ev) {
         document.body.classList.add('panning');
       }
       else if (s && s.item && s.item.kind === 'memo') {
-        // 便签：交给 HTML5 文本拖出（dragstart 已带 text/plain），
-        // 此处不动作——浏览器接管后 mousemove/mouseup 停止，dragend 里清理。
+        // 便签：纵向交给 HTML5 文本拖出（dragstart 方向仲裁已带 text/plain）；
+        // 横向已被 dragstart 取消并转入上面的 pan 分支。
       }
       else startDrag(dragState.id); // plain drag = native file drag (drop into chat apps etc.)
       if (!dragState.reordering && !dragState.tearing && !dragState.panning) clearPress();
@@ -1398,17 +1419,16 @@ function renderDiscover() {
 }
 function updateDiscover() {
   ensureDiscoverSlot();
+  // 发现卡挂在添加卡之后（绳尾），随绳滚动——与任何卡片都不重叠。
+  // fits 扇面放不下时让位隐藏（少量卡片才有扇面，属可接受的取舍）。
+  // 与普通卡完全同规：fits=序列倒数第二位（添加卡左侧），track=轨道里添加卡左侧
+  if (state.items.length === 0) { discoverSlotEl.style.display = 'none'; return; } // 空绳时让位欢迎卡
   let x;
-  if (track) {
-    x = track.addX + L.RATIOS.wide.rope.w + TRACK_GAP + 80;
-  } else {
-    // 紧凑布局：紧跟添加卡之后留足间距，贴边放不下就隐藏（轨道模式始终可见）
-    const addX = L.xAt(state.items.length, state.items.length + 1, width);
-    x = addX + Math.max(240, L.dynamicSpacing(1, width));
-    if (x + 90 > width - 6) { discoverSlotEl.style.display = 'none'; return; }
-  }
+  if (track) x = track.discX;
+  else x = L.xAt(state.items.length, state.items.length + 2, width);
+  if (!track && x + 90 > width - 6) { discoverSlotEl.style.display = 'none'; return; }
   discoverSlotEl.style.display = '';
-  discoverSlotEl.style.left = (x - 75) + 'px';
+  discoverSlotEl.style.left = (x - 92) + 'px';
   discoverSlotEl.style.top = (L.ropeY(x - scrollX, width) - L.PIN_ABOVE) + 'px';
 }
 setInterval(() => { discoverIdx++; renderDiscover(); }, 300000);

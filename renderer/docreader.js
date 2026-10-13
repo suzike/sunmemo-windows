@@ -249,6 +249,34 @@
         // A4 原生宽 ~880px，面板内放不下——按面板宽自动 zoom 整页缩放
         body.style.setProperty('--dxz', String(Math.max(0.34, Math.min(1, (width - 46) / 900))));
         await window.docx.renderAsync(r.buf, body, null, { inWrapper: true, breakPages: true, ignoreWidth: false });
+      } else if (item.docType === 'ppt' && /\.pptx$/i.test(item.url || '')) {
+        // PPTX 悬停速览：抽取每页文字（JSZip 已内置），按"幻灯片"卡呈现
+        if (typeof window.JSZip === 'undefined') throw new Error('解析器未加载');
+        const r = await api.invoke('doc:load', item.url);
+        if (disposed) return { el, dispose };
+        if (!r.ok) throw new Error(r.err || '读取失败');
+        const zip = await window.JSZip.loadAsync(r.buf);
+        if (disposed) return { el, dispose };
+        const names = Object.keys(zip.files)
+          .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+          .sort((a, b) => (parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10)));
+        if (!names.length) throw new Error('未找到可读的幻灯片文字');
+        const un = t => String(t).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+        body.innerHTML = '';
+        names.forEach((n, i) => {
+          const xml = zip.files[n].asText();
+          const texts = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m2 => un(m2[1])).filter(t2 => t2.trim());
+          const wrap = document.createElement('div');
+          wrap.className = 'docr-ppt-page';
+          wrap.innerHTML = '<div class="docr-ppt-num">第 ' + (i + 1) + ' 页</div>' +
+            (texts.length ? texts.slice(0, 10).map(t2 => '<div class="docr-ppt-line">' + window.escapeHtml(t2) + '</div>').join('')
+              : '<div class="docr-ppt-line empty">（本页无文字内容）</div>');
+          body.appendChild(wrap);
+        });
+        const foot2 = document.createElement('div');
+        foot2.className = 'docr-pdf-foot';
+        foot2.textContent = '共 ' + names.length + ' 页（文字版速览）· 点击卡片用系统应用打开';
+        body.appendChild(foot2);
       } else {
         body.innerHTML = '<div class="docr-info"><div class="docr-info-glyph" style="background:linear-gradient(145deg,' + m.c1 + ',' + m.c2 + ')">' + sheetGlyph(m) + '</div>' +
           '<div class="docr-info-name">' + window.escapeHtml(item.docName || '') + '</div>' +

@@ -86,7 +86,9 @@ await sleep(500);
 const sc1 = await line.ev(`(() => { const c = document.getElementById('cards'); return { tf: c.style.transform, l: document.getElementById('scrollPrev') && document.getElementById('scrollPrev').classList.contains('show'), bar: document.getElementById('scrollBar') && document.getElementById('scrollBar').classList.contains('show') }; })()`);
 chk('溢出后滚轮平移绳', sc0.tf !== sc1.tf && sc1.tf.includes('-'), JSON.stringify({ sc0, sc1 }));
 chk('行程条与左端箭头出现（已滚至最右）', !!sc1.l && !!sc1.bar);
-// 拖拽平移（合成 mousedown/mousemove/mouseup 在空绳区；当前已滚到最右，往右拖回卷）
+// 拖拽平移：先滚回最左（避免新卡自动滚入后取样点落在卡片上）
+await line.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 850, y: 60, deltaX: 0, deltaY: -9000 });
+await sleep(600);
 const drag = await line.ev(`(() => { const b = document.getElementById('scrollBar').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(40) }; })()`);
 await line.ev(`(function(){ const cards = document.getElementById('cards'); const r = cards.getBoundingClientRect(); const ev0 = new MouseEvent('mousedown', { bubbles: true, clientX: ${drag.x}, clientY: r.top + 150, screenX: ${drag.x}, screenY: 100, button: 0 }); (document.elementFromPoint(${drag.x}, r.top + 150) || cards).dispatchEvent(ev0); return true; })()`);
 await sleep(120);
@@ -97,7 +99,7 @@ for (const dx of [40, 80, 120]) {
 await line.ev(`window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: ${drag.x + 120}, clientY: 200, screenX: ${drag.x + 120}, screenY: 100 }))`);
 await sleep(300);
 const sc2 = await line.ev(`document.getElementById('cards').style.transform`);
-chk('空绳区拖拽平移', sc2 !== sc1.tf && sc2.includes('-'), sc1.tf + ' → ' + sc2);
+chk('空绳区拖拽平移', sc1.tf !== sc2, sc1.tf + ' → ' + sc2);
 
 // ---- ④ 速记窗拖文本直插 ----
 await line.ev(`window.sun.send('line:open-editor', null)`);

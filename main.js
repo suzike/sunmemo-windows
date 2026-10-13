@@ -425,11 +425,24 @@ function updateBeacon() {
 // then primary) — following the live cursor made cold-boot placement depend
 // on wherever the pointer happened to sit, which E2E and the beacon
 // continuity both guessed wrong.
+// v1.7.1 晾衣绳位置模式：follow = 光标所在显示器；fixed:<sig> = 固定某块屏
+function displaySig(d) {
+  return 'fixed:' + [d.bounds.x, d.bounds.y, d.bounds.width, d.bounds.height, d.primary ? 1 : 0].join('_');
+}
+function targetDisplay() {
+  const mode = store.settings.displayMode || 'follow';
+  if (mode !== 'follow') {
+    const hit = screen.getAllDisplays().find(d => displaySig(d) === mode);
+    if (hit) return hit;
+  }
+  return displayUnderCursor();
+}
 function placeOnDisplay(target) {
   const d = target || lastLineDisplay || screen.getPrimaryDisplay();
   lastLineDisplay = d;
   const wa = d.workArea;
   lineBounds = { x: wa.x, y: wa.y, width: wa.width, height: PANEL_H };
+  ropeDisplayBounds = (screen.getDisplayNearestPoint({ x: lineBounds.x + 10, y: lineBounds.y + 10 }) || {}).bounds || null;
   lineWin.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: PANEL_H });
   overlayWin.setBounds({ x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height });
 }
@@ -511,7 +524,7 @@ function setRevealed(on) {
 function revealLinePinned() {
   keepOpen = true;
   wanted = true;
-  placeOnDisplay();
+  placeOnDisplay(targetDisplay());
   refresh();
   // 2.5s grace, then normal auto-retract. Staying open is the 📌 button's job.
   reveal({ peekFor: 2.5 });
@@ -561,6 +574,7 @@ function stopMouseTracking() {
 }
 
 let cursorWasInside = false;
+let ropeDisplayBounds = null; // 绳所在显示器的 bounds（收回判定的信任范围）
 let lineScrollX = 0; // 晾衣绳横向滚动偏移（renderer 上报，飞行/预览落点用）
 let rendererHot = false; // R92: renderer-reported rope-zone hover
 let slowTicks = 0;       // [perf] consecutive away-and-tucked ticks before halving the poll rate
@@ -611,7 +625,12 @@ function tickInner() {
 
   if (!isRevealed) {
     // Resting against the top edge brings the line down on that screen.
-    if (wanted && d && (p.y - d.bounds.y) <= 2 && p.y >= d.bounds.y
+    let hotOk = true;
+    if ((store.settings.displayMode || 'follow') !== 'follow') {
+      const td = targetDisplay();
+      hotOk = !!(td && d && d.bounds === td.bounds);
+    }
+    if (wanted && hotOk && d && (p.y - d.bounds.y) <= 2 && p.y >= d.bounds.y
         && !isFullscreenLike(d)) {
       const since = hotZoneSince || now;
       hotZoneSince = since;
@@ -629,15 +648,17 @@ function tickInner() {
 
   // The line's zone runs from its lowest point up to the top of the screen.
   const lb = lineBounds || lineWin.getBounds();
-  const geomInside = p.x >= lb.x && p.x <= lb.x + lb.width && p.y >= d.bounds.y && p.y <= lb.y + lb.height;
-  // v1.6 修复"有时不收回"：rendererHot（renderer 悬停热区）在覆盖窗出现、
-  // mouseleave 丢失时会永久卡 true。光标远离绳带 140px 即不再采信。
-  if (rendererHot && !geomInside) {
-    const near = p.x >= lb.x - 140 && p.x <= lb.x + lb.width + 140 &&
-                 p.y >= d.bounds.y - 40 && p.y <= lb.y + lb.height + 140;
-    if (!near) rendererHot = false;
-  }
+  // v1.7.1 修复"移到副屏下半区绳不收回"：几何判定必须用绳带自己的矩形——
+  // 旧写法拿"光标所在显示器的顶部"当上界，副屏在主屏上方时该带高达整块
+  // 副屏，鼠标停在副屏下半区会被误判为仍在绳上。
+  const geomInside = p.x >= lb.x - 60 && p.x <= lb.x + lb.width + 60 &&
+                     p.y >= lb.y - 40 && p.y <= lb.y + lb.height + 60;
+  // rendererHot 只在光标位于绳所在显示器时采信（R92 混合 DPI 偏差场景），
+  // 光标去了别的屏立即作废——防止 mouseleave 丢失导致的永久卡 true。
+  if (rendererHot && ropeDisplayBounds && d && d.bounds !== ropeDisplayBounds) rendererHot = false;
   const inside = geomInside || rendererHot;
+  // docPeek 状态与 overlay 可见性一致性兜底
+  if (docPeekOpen && overlayWin && !overlayWin.isDestroyed() && !overlayWin.isVisible()) docPeekOpen = false;
   if (inside && pinned && !previewOpen) pinned = false;
 
   // v1.6 修复"移走鼠标绳不收回"：pinned 不再计入 busy——移开 500ms 即收回
@@ -715,7 +736,7 @@ async function uploadLocalImage() {
 function hangMemoFlight(memoData, fromRect) {
   keepOpen = true;
   wanted = true;
-  placeOnDisplay();
+  placeOnDisplay(targetDisplay());
   refresh();
   // v1.6 修复"移走鼠标绳不收回"：pinned 只在光标重新进入绳带时才清除，
   // 提交后鼠标若不经过绳带就永久卡住。改用 2.5s 宽限 peek——看得到落绳，
@@ -925,6 +946,11 @@ function showMemory() {
   overlayWin.webContents.send('show-memory', { weeks, count: sync.archived.length });
 }
 ipcMain.on('memory:open', () => showMemory());
+  // 晾衣绳位置设置：列出已连接显示器（设置窗下拉用）
+  ipcMain.handle('displays:list', () => screen.getAllDisplays().map(d => ({
+    id: displaySig(d),
+    label: (d.primary ? '主显示器 ' : '扩展显示器 ') + d.bounds.width + '×' + d.bounds.height,
+  })));
 ipcMain.on('line:memory', () => showMemory()); // 命令面板入口（line 端通道）
 ipcMain.on('memory:restore', (_e, idx) => {
   const id = store.restoreArchived(Number(idx));
@@ -987,6 +1013,7 @@ function closeDocPeek() {
 
 function closePreview() {
   previewOpen = false;
+  closeDocPeek(); // v1.7.1: 工具窗/搜索打开时把悬停阅读面板一并收掉
   if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible()) overlayWin.hide(); // R103
 }
 
