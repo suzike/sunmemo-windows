@@ -33,6 +33,52 @@ module.exports = async function selftest(ctx) {
   check('todo line toggled to [x]', store.items[0].memo.text.includes('- [x] 第一件事'));
   check('allDone → isDone true', store.items[0].memo.isDone === true);
 
+  // 3b. v1.8 退场钩子：正好打完最后一项时触发 onAllDone（此前未满、此刻全满）
+  {
+    let offered = null;
+    const prevHook = store.onAllDone;
+    store.onAllDone = it => { offered = it ? it.id : null; };
+    const id2 = store.addMemo({ text: '- [ ] 甲\n- [ ] 乙', color: 'yellow' });
+    store.toggleMemoTodoLine(id2, 0);
+    check('exit hook NOT fired while todos remain', offered === null);
+    store.toggleMemoTodoLine(id2, 1);
+    check('exit hook fired on the final tick', offered === id2);
+    // 取消一个再打回去：再次触发（退场机会跟着"完成瞬间"走）
+    store.toggleMemoTodoLine(id2, 0);
+    offered = null;
+    store.toggleMemoTodoLine(id2, 0);
+    check('exit hook refires after un-done → re-done', offered === id2);
+    store.onAllDone = prevHook;
+  }
+
+  // 3c. v1.8 沉降布局：龄期判定与展示序（活跃在前、闲置原序聚尾、置顶不沉）
+  {
+    const { ageDaysOf, sinkOrder, SINK_DAYS } = require('./layout');
+    const now = Date.now();
+    const day = 86400000;
+    const old1 = { id: 'old1', kind: 'doc', url: 'C:\\x.pdf' };
+    const act = { id: 'act', kind: 'doc', url: 'C:\\y.pdf' };
+    const pin = { id: 'pin', kind: 'memo', memo: { pinned: true, touchedAt: new Date(now - 30 * day).toISOString() } };
+    const old2 = { id: 'old2', kind: 'memo', memo: { touchedAt: new Date(now - (SINK_DAYS + 1) * day).toISOString() } };
+    const touches = { 'C:\\x.pdf': now - 9 * day, 'C:\\y.pdf': now };
+    check('ageDaysOf: doc uses touches table', Math.round(ageDaysOf(old1, touches, now)) === 9);
+    check('ageDaysOf: memo uses touchedAt', Math.round(ageDaysOf(old2, touches, now)) === SINK_DAYS + 1);
+    const ordered = sinkOrder([old1, act, pin, old2], new Set(['old1', 'old2']));
+    check('sinkOrder: active+pinned stay, aged gather at tail',
+      ordered.map(i => i.id).join(',') === 'act,pin,old1,old2');
+  }
+
+  // 3d. v1.8 图片/文档触达表持久化（沉降龄期的跨重启来源）
+  {
+    const img = store.items.find(i => i.kind === 'image');
+    if (img) {
+      store.touch(img.id);
+      store.saveSettingsOnly();
+      const cfg = JSON.parse(fs.readFileSync(store.configPath, 'utf8'));
+      check('touch() persists to config.touches', !!(cfg.touches && cfg.touches[img.url] > 0));
+    }
+  }
+
   // 4. aspect ratio change persists
   store.updateMemoAspectRatio(id, 'tall');
   const onDisk = JSON.parse(fs.readFileSync(store.items[0].url, 'utf8'));

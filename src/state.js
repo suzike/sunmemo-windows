@@ -28,6 +28,7 @@ class LineStore {
     this.onChange = null;       // () => void     (broadcast hook)
     this.onSound = null;        // (name, volume) => void
     this.onSync = null;         // (items) => void
+    this.onAllDone = null;      // (item) => void  v1.8 退场钩子：一张便签全部打勾的瞬间
     this.isInternalCopy = false;
     this.syncRef = null; // set by main: lets restoreArchived reach the archive
 
@@ -44,6 +45,7 @@ class LineStore {
       beacon: true,
       autoHang: false,
       imgZoom: true, // R206+: 悬停图片自动放大（苹果式弹簧缩放，可在设置关闭）
+      sink: true,    // v1.8 沉降布局：闲置 3 天的卡片自动沉到绳尾（设置可关）
       autoUpdate: true,
       welcomed: false,
       inboxOffered: false,
@@ -58,6 +60,10 @@ class LineStore {
     // 卡片角度持久化：照片是外部文件不能回写，角度按路径存 config.json 的
     // tilts 表（memo 的角度直接写进各自 json，不走这张表）。
     this.tilts = {};
+    // v1.8 沉降布局：图片/文档卡的"最近触达"表（url → ms）。memo 的触达时间
+    // 就在自己的 touchedAt 里，不需要这张表。交互（预览/打开/复制/悬停阅读）
+    // 经 touch() 更新，沉降龄期据此归零。
+    this.touches = {};
     this.loadConfig();
   }
 
@@ -69,6 +75,7 @@ class LineStore {
         const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
         if (Array.isArray(raw.pegged)) this.peggedPaths = raw.pegged;
         if (raw.tilts && typeof raw.tilts === 'object') this.tilts = raw.tilts;
+        if (raw.touches && typeof raw.touches === 'object') this.touches = raw.touches;
         if (raw.settings) Object.assign(this.settings, raw.settings);
         if (raw.settings && raw.settings.hotkeys) Object.assign(this.settings.hotkeys, raw.settings.hotkeys);
         return;
@@ -116,8 +123,17 @@ class LineStore {
     return out;
   }
 
+  // touches 表同理只留在绳条目（图片/文档），离绳即清。
+  liveTouches() {
+    const out = {};
+    for (const i of this.items) {
+      if (i.kind !== 'memo' && this.touches[i.url] != null) out[i.url] = this.touches[i.url];
+    }
+    return out;
+  }
+
   saveConfigNow() {
-    const payload = { pegged: this.peggedPaths, settings: this.settings, tilts: this.photoTilts() };
+    const payload = { pegged: this.peggedPaths, settings: this.settings, tilts: this.photoTilts(), touches: this.liveTouches() };
     try {
       fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
       this.writeJsonAtomic(this.configPath, JSON.stringify(payload, null, 2));
@@ -144,7 +160,7 @@ class LineStore {
   }
 
   saveSettingsOnly() {
-    const payload = { pegged: this.peggedPaths, settings: this.settings, tilts: this.photoTilts() };
+    const payload = { pegged: this.peggedPaths, settings: this.settings, tilts: this.photoTilts(), touches: this.liveTouches() };
     try {
       fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
       this.writeJsonAtomic(this.configPath, JSON.stringify(payload, null, 2));
@@ -233,6 +249,7 @@ class LineStore {
         docSize: st.size,
         docMtime: st.mtimeMs,
       };
+      if (this.touches[url] == null) this.touches[url] = Date.now();
     } else {
       const thumb = this.makeThumb(url);
       if (!thumb) return null;
@@ -242,6 +259,7 @@ class LineStore {
         flying, falling: false,
         thumb: thumb.dataURL, thumbW: thumb.w, thumbH: thumb.h,
       };
+      if (this.touches[url] == null) this.touches[url] = Date.now();
     }
     this.items.push(item);
     this.sortLine();
@@ -285,6 +303,22 @@ class LineStore {
 
   // ---- memo operations ---------------------------------------------------------
 
+  // v1.8 沉退布局的触达入口：预览/打开/复制/悬停阅读/重排等交互都会调到这里。
+  // memo 刷新各自 json 的 touchedAt（晒褪色同一来源）；图片/文档写 config 的
+  // touches 表。只广播 + 落盘，不重写 SunMemo.md（内容没变）。
+  touch(id) {
+    const item = this.find(id);
+    if (!item || item.falling) return;
+    if (item.kind === 'memo') {
+      item.memo.touchedAt = new Date().toISOString();
+      this.writeMemoFile(item);
+    } else {
+      this.touches[item.url] = Date.now();
+      this.scheduleConfigSave();
+    }
+    if (this.onChange) this.onChange();
+  }
+
   updateMemo(id, { text, color, aspectRatio }) {
     const item = this.find(id);
     if (!item || item.kind !== 'memo') return;
@@ -307,19 +341,32 @@ class LineStore {
     this.play('tink', 0.25);
   }
 
+  // v1.8 退场：判定"这张便签刚好全部打完"的瞬间（此前未满、此刻全满）。
+  // 一个便签可以只有 isDone 总开关（无清单行），同样算全满。
+  emitAllDoneIfJustFinished(item, wasAllBefore) {
+    const st = calculateTodoStats(item.memo.text);
+    const allNow = st.total > 0 && st.completed === st.total;
+    if (allNow && !wasAllBefore && this.onAllDone) this.onAllDone(item);
+  }
+
   toggleMemoDone(id) {
     const item = this.find(id);
     if (!item || item.kind !== 'memo') return;
+    const st0 = calculateTodoStats(item.memo.text);
+    const wasAll = st0.total > 0 && (item.memo.isDone || st0.completed === st0.total);
     item.memo.isDone = !item.memo.isDone;
     item.memo.touchedAt = new Date().toISOString();
     this.writeMemoFile(item);
     this.save();
     if (item.memo.isDone) this.play('pop', 0.25);
+    this.emitAllDoneIfJustFinished(item, wasAll);
   }
 
   toggleMemoTodoLine(id, lineIndex) {
     const item = this.find(id);
     if (!item || item.kind !== 'memo') return;
+    const st0 = calculateTodoStats(item.memo.text);
+    const wasAll = st0.total > 0 && (item.memo.isDone || st0.completed === st0.total);
     const result = toggleTodoLine(item.memo.text, lineIndex);
     item.memo.text = result.newText;
     item.memo.isDone = result.allDone;
@@ -327,6 +374,7 @@ class LineStore {
     this.writeMemoFile(item);
     this.save();
     this.play('pop', 0.25);
+    this.emitAllDoneIfJustFinished(item, wasAll);
   }
 
   writeMemoFile(item) {

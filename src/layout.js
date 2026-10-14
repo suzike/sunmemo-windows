@@ -53,6 +53,33 @@ function xAt(index, count, width) {
   return width / 2 - total / 2 + index * step;
 }
 
+// ---- v1.8 沉降布局 ----------------------------------------------------------
+// 绳一长"可见"就死了：解法不在新功能，在布局规则——N 天没动的卡自动沉到绳尾、
+// 缩小降透明，活跃卡永远占黄金视野。绳自己排优先级，而不是逼人整理。
+// 龄期判定与晒褪色同一套触达时间源：memo 用 touchedAt/createdAt，图片/文档
+// 用 config touches 表（store.touch 在交互时更新）。置顶便签永不沉。
+const SINK_DAYS = 3;
+
+function ageDaysOf(item, touches, now) {
+  let t = 0;
+  if (item.kind === 'memo') {
+    t = new Date((item.memo && (item.memo.touchedAt || item.memo.createdAt)) || 0).getTime();
+  } else {
+    t = (touches && touches[item.url]) || 0;
+  }
+  if (!t || !isFinite(t)) return 0;
+  return Math.max(0, ((now || Date.now()) - t) / 86400000);
+}
+
+// 展示序：活跃卡保持原相对顺序在前，沉底卡原相对顺序聚到绳尾（纯视图层排序，
+// 不动 store.items —— 保存的挂绳顺序与 Alt 拖拽顺序不受影响）。
+function sinkOrder(items, agedSet) {
+  if (!agedSet || !agedSet.size) return items;
+  const active = [], aged = [];
+  for (const it of items) (agedSet.has(it.id) ? aged : active).push(it);
+  return active.concat(aged);
+}
+
 // Item width on the rope.
 function ropeWidth(item) {
   if (item.kind === 'memo') {
@@ -105,7 +132,8 @@ function addCardPeekOffset(hoveredIndex, itemCount) {
 }
 
 const L = { PANEL_H, ROPE_TOP, CARD_W, PIN_ABOVE, CARD_RADIUS, CARD_INSET, CARD_OFFSET_BELOW_TOP,
-  RATIOS, sag, ropeY, dynamicSpacing, xAt, ropeWidth, cardFrame, peekTransform, addCardPeekOffset, setSoftwareMode };
+  RATIOS, sag, ropeY, dynamicSpacing, xAt, ropeWidth, cardFrame, peekTransform, addCardPeekOffset, setSoftwareMode,
+  SINK_DAYS, ageDaysOf, sinkOrder };
 
 // CommonJS (main process) and <script> (renderer pages) both work.
 if (typeof module !== 'undefined' && module.exports) module.exports = L;

@@ -177,6 +177,15 @@ app.whenReady().then(async () => {
 
   store.syncRef = sync; // recycle-bin restore access
 
+  // v1.8 退场钩子：一张便签"刚好全部打完"的瞬间 → 绳上弹「收进回忆板？」确认。
+  // 绳不在场（收起）时跳过——那一刻必须是用户正在打勾的当场。
+  store.onAllDone = item => {
+    if (!lineWin || lineWin.isDestroyed() || !isRevealed) return;
+    const first = String((item.memo && item.memo.text) || '').split(String.fromCharCode(10))[0].replace(/^#+\s*/, '').trim();
+    lineWin.webContents.send('exit-offer', { id: item.id, text: first.slice(0, 24) });
+  };
+
+
   watchers = new Watchers({
     shotsFolder,
     // [perf] makeThumb decodes synchronously inside store.hang — defer it one
@@ -299,8 +308,10 @@ app.whenReady().then(async () => {
           glassBDF: glass ? getComputedStyle(glass).backdropFilter : 'n/a' };
         document.querySelectorAll('.slot').forEach((s, i) => {
           const q = sel => { const e = s.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { y: +r.y.toFixed(1), h: +r.height.toFixed(1), x: +r.x.toFixed(1) }; };
-          out.slots.push({ i, peg: q('.peg'), face: q('.memo-face'), body: q('.memo-body'), head: q('.md-h'), foot: q('.memo-foot') });
+          out.slots.push({ i, cls: s.className.replace('slot arrived', '').trim(), id: s.dataset.id || '', left: s.style.left, top: s.style.top, peg: q('.peg'), face: q('.memo-face'), body: q('.memo-body'), head: q('.md-h'), foot: q('.memo-foot') });
         });
+        out.disc = (() => { const w = document.querySelector('.discover-slot'); return w ? { display: getComputedStyle(w).display } : null; })();
+        out.scrollUI = !!document.getElementById('scrollBar');
         return JSON.stringify(out);
       })()`);
       console.log('[probe]', info);
@@ -416,6 +427,20 @@ function updateBeacon() {
   } else if (beaconWin.isVisible()) {
     beaconWin.hide();
   }
+}
+
+// v1.8 信标状态：绳收着的 90% 时间里待办也要在场——胶囊常显「N 件未收尾」，
+// 全部打完显示「今日清零 ✓」。随 broadcast（含每次打勾）推送；beacon 加载完成
+// 时还会经 beacon:get-stats 主动拉一次，避免启动竞态漏掉首帧。
+function beaconStatsNow() {
+  const memos = store.items.filter(i => i.kind === 'memo' && !i.falling && !i.desktop);
+  let total = 0, done = 0;
+  memos.forEach(m => { const st = calculateTodoStats(m.memo.text); total += st.total; done += st.completed; });
+  return { total, done, live: store.liveCount() };
+}
+function pushBeaconStats() {
+  if (!beaconWin || beaconWin.isDestroyed()) return;
+  try { beaconWin.webContents.send('beacon:stats', beaconStatsNow()); } catch { /* ignore */ }
 }
 
 // R96: per-display placement — the argument used to be silently ignored
@@ -603,10 +628,15 @@ function tickInner() {
 
   // When the real cursor leaves the strip, tell the renderer to drop any
   // stuck hover state (badges / toolbars) — mouseleave is not reliable here.
+  // v1.8.1: renderer 报告 line:hot（光标确实在绳上组件）期间不发 cool——
+  // 混合 DPI 副屏上 getCursorScreenPoint 与窗口边界有偏差，主进程会误判
+  // "已离开"并发 cool 清掉 renderer 悬停态：文档 320ms 驻留预览和窗口堆
+  // 300ms 展开都被这发子弹打死（"偶发不展开"的根因）。renderer 的
+  // mouseleave 是真实源，主进程几何只在 renderer 沉默时兜底。
   if (lineBounds) {
     const inside = p.x >= lineBounds.x && p.x <= lineBounds.x + lineBounds.width &&
                    p.y >= lineBounds.y && p.y <= lineBounds.y + lineBounds.height;
-    if (cursorWasInside && !inside && lineWin && !lineWin.isDestroyed()) {
+    if (cursorWasInside && !inside && !rendererHot && lineWin && !lineWin.isDestroyed()) {
       lineWin.webContents.send('line:cool');
     }
     cursorWasInside = inside;
@@ -964,12 +994,18 @@ ipcMain.on('memory:close', () => {
   if (!previewOpen && !docPeekOpen && overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible()) overlayWin.hide();
 });
 
+// ---- v1.8 桌面窗口堆 ---------------------------------------------------------（功能已移除）
+
+// v1.8 信标状态：beacon 页面加载完成时主动拉一次（消除启动时序竞态）
+ipcMain.handle('beacon:get-stats', () => beaconStatsNow());
+
 // v1.6 文档卡悬停弹出阅读（Quick Look popover）：overlay 全屏窗承载 420×600
 // 阅读面板，锚定卡片上方（底边压住卡顶，光标保持在面板内避免闪烁回环）。
 let docPeekOpen = false, docPeekSince = 0;
 ipcMain.on('line:doc-peek', (_e, { id }) => {
   const item = store.find(id);
   if (!item || item.kind !== 'doc' || item.falling || previewOpen) return;
+  store.touch(id); // v1.8: 悬停阅读也是"动了它"——沉降龄期归零
   showDocPeek(item);
 });
 ipcMain.on('line:doc-peek-close', (_e, p) => {
@@ -1464,6 +1500,7 @@ function broadcast() {
     draggingID,
     pressedID,
     userPinned,
+    agedIds: agedIdsNow(), // v1.8 沉降布局：闲置卡 id 集合（renderer 只做视图层排序）
   });
   // Keep an open hero preview in sync (todo toggles reflect immediately).
   if (previewOpen && previewCurrentId && overlayWin && !overlayWin.isDestroyed()) {
@@ -1479,6 +1516,21 @@ function broadcast() {
     }
   }
   refreshTray();
+  pushBeaconStats();
+}
+
+// v1.8 沉降布局：3 天（L.SINK_DAYS）没动的卡自动沉到绳尾。置顶便签永不沉；
+// 图片/文档的龄期来自 config touches 表，memo 用自己的 touchedAt。
+function agedIdsNow() {
+  if (store.settings.sink === false) return [];
+  const now = Date.now();
+  const out = [];
+  for (const i of store.items) {
+    if (i.falling || i.desktop) continue;
+    if (i.kind === 'memo' && i.memo.pinned) continue;
+    if (L.ageDaysOf(i, store.touches, now) >= L.SINK_DAYS) out.push(i.id);
+  }
+  return out;
 }
 
 function window_width() { return 900; }
@@ -1493,12 +1545,14 @@ function setupIPC() {
   ipcMain.on('line:hit', (_e, rects) => { hitRects = Array.isArray(rects) ? rects : []; });
   // (line:hot retired — see the click-through model note above.)
 
-  ipcMain.on('line:open-preview', (_e, id) => showPreview(id));
-  ipcMain.on('line:open-editor', (_e, id) => showQuickMemo(id || null));
+  ipcMain.on('line:open-preview', (_e, id) => { store.touch(id); showPreview(id); });
+  ipcMain.on('line:open-editor', (_e, id) => { if (id) store.touch(id); showQuickMemo(id || null); });
   ipcMain.on('line:discard', (_e, id) => store.discard(id));
-  ipcMain.on('line:copy', (_e, id) => store.copy(id));
+  ipcMain.on('line:copy', (_e, id) => { store.touch(id); store.copy(id); });
   ipcMain.on('line:toggle-done', (_e, id) => store.toggleMemoDone(id));
   ipcMain.on('line:undo-torn', () => { const id = store.undoTorn(); if (id) revealLinePinned(); });
+  // v1.8 退场确认的「收进回忆板」：走 discard 管线（归档 + crumple 落下动画）
+  ipcMain.on('line:archive-done', (_e, id) => store.discard(id));
   // R76: Markdown 引用格式构建（供右键菜单/预览共用）
 function buildMdQuote(m) {
   const NL = String.fromCharCode(10);
@@ -1593,6 +1647,7 @@ async function exportMemoPng(id) {
     draggingID,
     pressedID,
     userPinned,
+    agedIds: agedIdsNow(),
   }));
   // thumb 自愈：thumbSent 是「对 line 一次性」优化，但搜索/预览等任何窗口的
   // 强制序列化都会把额度烧掉，renderer reload 的竞态也可能错过唯一一次发送。
@@ -1678,7 +1733,7 @@ async function exportMemoPng(id) {
     }
   });
   ipcMain.on('line:toggle-pinned', (_e, id) => store.toggleMemoPinned(id));
-  ipcMain.on('line:reorder', (_e, { id, toIndex }) => store.reorder(id, toIndex));
+  ipcMain.on('line:reorder', (_e, { id, toIndex }) => { store.reorder(id, toIndex); store.touch(id); });
   // 卡片角度持久化：重排/摆弄后 renderer 把新角度落库（store.setTilt）。
   ipcMain.on('line:set-tilt', (_e, { id, tilt }) => store.setTilt(id, tilt));
   ipcMain.on('line:toggle-ratio', (_e, { id, ratio }) => store.updateMemoAspectRatio(id, ratio));
@@ -1792,6 +1847,7 @@ async function exportMemoPng(id) {
   ipcMain.on('line:menu', (_e, id) => {
     const item = store.find(id);
     if (!item) return;
+    store.touch(id); // v1.8: 唤出菜单即视为"动了它"
     const template = item.kind === 'memo' ? [
       ...(calculateTodoStats(item.memo.text).total > 0 && calculateTodoStats(item.memo.text).completed === calculateTodoStats(item.memo.text).total
         ? [{ label: '🎉 全部待办已完成', enabled: false }]

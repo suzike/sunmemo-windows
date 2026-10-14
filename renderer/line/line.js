@@ -318,7 +318,7 @@ function statsBadge(memo) {
 }
 
 function applyPeek() {
-  const items = state.items;
+  const items = orderedItems();
   const hIdx = items.findIndex(i => i.id === hoveredId);
   items.forEach((item, index) => {
     const s = slots.get(item.id);
@@ -352,7 +352,7 @@ function scheduleLayout() {
 // 卡片 top 跟随其屏幕 x 重新落位——滑动时有"沿着绳浪走"的物理感。
 const TRACK_MARGIN = 110;   // 两端留白（约半张卡）
 const TRACK_GAP = 46;       // 相邻卡片净距
-let track = null;           // { map:id→trackX中心, addX, contentW, maxScroll }
+let track = null;           // { map:id→trackX中心, addX, discX, contentW, maxScroll }
 let scrollX = 0;
 // v1.7 趣味件状态（必须先于 placeRopeTops 定义——早期广播会触发 layout）
 let birdEl = null, birdLeaveTimer = null;
@@ -490,10 +490,16 @@ function updateScrollUI() {
 // R154: 增量布局缓存——广播频繁（勾选待办也会广播），多数广播只改内容不改顺序。
 let lastOrder = '';
 let lastWidth = 0;
+// v1.8 沉降布局的展示序：活跃卡在前、闲置卡原序聚到绳尾（纯视图层，store 序不动）。
+function orderedItems() {
+  const items = state.items;
+  const aged = state.agedSet;
+  return aged && aged.size ? L.sinkOrder(items, aged) : items;
+}
 function layout() {
   if (document.body.classList.contains('sw') && L.setSoftwareMode) L.setSoftwareMode(true);
   width = window.innerWidth;
-  const items = state.items;
+  const items = orderedItems();
   const total = items.length + 2; // 统一序列：items + 每日发现卡 + 添加卡
   const hIdx = items.findIndex(i => i.id === hoveredId);
   drawRope();
@@ -504,6 +510,7 @@ function layout() {
     || items.some(i => i.flying || i.falling)
     || Array.from(slots.values()).some(sl => sl.el.classList.contains('flying') || sl.el.classList.contains('falling'));
   const reposition = order !== lastOrder || width !== lastWidth || animating;
+  const orderChanged = order !== lastOrder;
   lastOrder = order;
   lastWidth = width;
   track = computeTrack(items, width);
@@ -522,6 +529,8 @@ function layout() {
       s.el.style.height = (L.PANEL_H - L.ropeY(xpos.sx, width)) + 'px';
       s.el.style.zIndex = peek.z;
       s.el.style.transform = 'translate(' + peek.xOff + 'px, ' + peek.yOff + 'px) rotate(' + peek.tilt + 'deg)';
+      // v1.8 沉降：闲置卡缩小、下沉、去饱和（.slot.sunk，交互即浮回）
+      s.el.classList.toggle('sunk', !!(state.agedSet && state.agedSet.has(item.id)));
       const wasFalling = s.el.classList.contains('falling');
       s.el.classList.toggle('falling', !!item.falling);
       // R160: crumple-then-drop on the line card itself — squeeze into a paper
@@ -580,6 +589,9 @@ function layout() {
   updateWelcomeCard(items.length);
   updateScrollUI();
   reportHitRects();
+  // v1.8 沉降滑动（560ms left 过渡）结束后命中矩形才真正落位——补报一次，
+  // 否则收起后的点击穿透热区对准的是滑动前的位置。
+  if (orderChanged) setTimeout(() => { if (!layoutQueued) reportHitRects(); }, 620);
 }
 
 let addSlotEl = null;
@@ -1182,6 +1194,8 @@ function handleState(s) {
     else it.tilt = t;
   });
   state = s;
+  // v1.8 沉降布局：主进程判定的闲置卡 id 集合（视图层排序 + sunk 样式）
+  state.agedSet = new Set(s.agedIds || []);
   // R98: 📌 must SHOW whether the stay-open toggle is on — users clicked it
   // twice (on then off) because nothing on the button ever changed.
   pinViewBtn.classList.toggle('pinned', !!s.userPinned);
@@ -1412,3 +1426,33 @@ function updateDiscover() {
 }
 setInterval(() => { discoverIdx++; renderDiscover(); }, 300000);
 showSeedIfToday();
+
+// ---- v1.8 退场：一张便签"刚好全部打完"的瞬间 → 「收进回忆板？」--------------
+// 这是清理成本趋近于零的关键：完成的那一刻就是最自然的退场时机。
+let exitOfferTimer = null;
+api.on('exit-offer', d => {
+  const old = document.getElementById('exitOffer');
+  if (old) old.remove();
+  if (exitOfferTimer) { clearTimeout(exitOfferTimer); exitOfferTimer = null; }
+  const esc = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const t = document.createElement('div');
+  t.id = 'exitOffer';
+  t.style.cssText = 'position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:12px;background:rgba(36,36,42,0.96);color:#eee;font-size:12px;z-index:200000;animation:toast-in 300ms ease;box-shadow:0 10px 30px rgba(0,0,0,0.35);white-space:nowrap;';
+  t.innerHTML = '<span>🎉 「' + esc(d.text) + '」全部完成</span><span style="opacity:.7">收进回忆板？</span>'
+    + '<button data-x="ok" style="border:0;background:#ff8f1f;color:#fff;border-radius:7px;padding:4px 11px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">收进回忆板</button>'
+    + '<button data-x="no" style="border:1px solid rgba(255,255,255,0.25);background:transparent;color:#ddd;border-radius:7px;padding:4px 11px;font-size:11.5px;cursor:pointer;font-family:inherit">留在绳上</button>';
+  const dismiss = () => {
+    if (exitOfferTimer) { clearTimeout(exitOfferTimer); exitOfferTimer = null; }
+    t.style.opacity = '0';
+    t.style.transition = 'opacity 260ms ease';
+    setTimeout(() => t.remove(), 280);
+  };
+  t.querySelector('[data-x="ok"]').addEventListener('click', () => { api.send('line:archive-done', d.id); dismiss(); });
+  t.querySelector('[data-x="no"]').addEventListener('click', dismiss);
+  stage.appendChild(t);
+  exitOfferTimer = setTimeout(() => {
+    const e = document.getElementById('exitOffer');
+    if (e) { e.style.opacity = '0'; e.style.transition = 'opacity 300ms'; setTimeout(() => e.remove(), 320); }
+    exitOfferTimer = null;
+  }, 9000);
+});

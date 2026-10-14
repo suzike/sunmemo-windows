@@ -864,3 +864,22 @@ body:not(.power-save) .slot.hover .cardfx {
     0 14px 32px -8px rgba(40, 36, 30, 0.34),
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.6);
 }
+
+/* ---- v1.8 沉降布局：闲置 3 天的卡自动沉到绳尾 -----------------------------
+   绳一长"可见"就死了——绳自己排优先级：活跃卡占黄金视野，闲置卡缩小下沉聚到
+   绳尾。交互（预览/编辑/复制/悬停阅读）即浮回。left 过渡让归队像滑过去而不是
+   跳过去；flying/fall 不参与（首帧定位与坠落必须瞬时）。 */
+.slot.arrived { transition: transform var(--dur-card) var(--ease-spring), left 560ms cubic-bezier(0.30, 1.24, 0.64, 1); }
+.slot.sunk:not(.pressed):not(.reordering) .cardfx {
+  transform: scale(0.85) translateY(10px);
+  opacity: 0.94;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 4px 10px -4px rgba(40, 36, 30, 0.18),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.4);
+}
+.slot.sunk .card.photo img { filter: saturate(0.78) brightness(1.03); }
+.slot.sunk .doc-face { filter: saturate(0.82); }
+@media (prefers-reduced-motion: reduce) {
+  .slot.arrived { transition: transform var(--dur-card) var(--ease-spring); }
+}

@@ -12,8 +12,8 @@
 
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![electron](https://img.shields.io/badge/Electron-43-47848F)
-![version](https://img.shields.io/badge/version-1.7.0-ff8f1f)
-![tests](https://img.shields.io/badge/tests-19%E8%87%AA%E6%B5%8B%20%2B%2026%20E2E-brightgreen)
+![version](https://img.shields.io/badge/version-1.8.0-ff8f1f)
+![tests](https://img.shields.io/badge/tests-25%E8%87%AA%E6%B5%8B%20%2B%2026%20E2E-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 **[快速开始](#-快速开始) · [界面一览](#-界面一览) · [全局快捷键](#️-全局快捷键) · [更新日志](CHANGELOG.md)**
@@ -42,6 +42,9 @@
 - 🐦 **绳上小鸟与太阳种子** —— 小鸟随机来访小憩；完成当天全部待办，它会叼来一颗太阳种子挂在绳尾
 - 🕰 **时光晾衣绳** —— 撕下的便签按周陈列成回忆板，点击任意一张即可放回绳上
 - ◐ **每日发现卡** —— 绳尾图文卡片每 5 分钟轮换好书 / 电影 / 音乐 / 格言 / 知识点，每天一套新组合
+- 🌊 **沉降布局** —— 3 天没动的卡片自动缩小沉到绳尾，活跃卡片永远占黄金视野；碰一下就浮回（设置可关）
+- ☀️ **信标常显待办** —— 绳收起时顶部太阳胶囊常显「N 件未收尾」，全部打完变金色「今日清零 ✓」
+- 🕰 **全打完就收绳** —— 一张便签打完最后一项的瞬间，弹「收进回忆板？」一句确认，完成即退场
 
 ## 🔍 悬停即放大（v1.5.0 新增）
 
@@ -113,7 +116,7 @@ node tests/smoke.mjs         # 功能冒烟（文档卡/滚动/拖文本，需 d
 
 ## 📦 版本
 
-当前 **v1.7.0** —— 绳上小鸟、太阳种子、时光回忆板与每日发现卡。完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前 **v1.8.0** —— 沉降布局、信标待办状态与全打完退场确认。完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 📄 License
 

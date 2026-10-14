@@ -52,6 +52,7 @@ api.invoke('settings:data').then(d => {
   themeRow.appendChild(pick);
   document.getElementById('chkSound').checked = d.settings.soundOn;
   document.getElementById('chkImgZoom').checked = d.settings.imgZoom !== false;
+  document.getElementById('chkSink').checked = d.settings.sink !== false;
   // 晾衣绳位置：跟随鼠标 / 固定某块显示器
   (async () => {
     try {
@@ -153,6 +154,7 @@ document.getElementById('chkAutoHang').addEventListener('change', e => api.send(
 document.getElementById('selDisplay').addEventListener('change', e => api.send('settings:set', { key: 'displayMode', value: e.target.value }));
 document.getElementById('chkSound').addEventListener('change', e => api.send('settings:set', { key: 'soundOn', value: e.target.checked }));
 document.getElementById('chkImgZoom').addEventListener('change', e => api.send('settings:set', { key: 'imgZoom', value: e.target.checked }));
+document.getElementById('chkSink').addEventListener('change', e => api.send('settings:set', { key: 'sink', value: e.target.checked }));
 document.getElementById('chkPower').addEventListener('change', e => api.send('settings:set', { key: 'powerSave', value: e.target.checked }));
 document.getElementById('chkWind').addEventListener('change', e => api.send('settings:set', { key: 'wind', value: e.target.checked }));
 document.getElementById('resetAppearance').addEventListener('click', () => {

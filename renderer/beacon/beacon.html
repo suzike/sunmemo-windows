@@ -8,7 +8,9 @@
 html, body { background: transparent; overflow: hidden; width: 100%; height: 100%; }
 #beacon {
   /* solid widget: 97% opaque dark pill — always hittable on Windows */
-  width: 64px; height: 26px;
+  /* v1.8 信标状态：有未收尾待办时胶囊常显「N 件未收尾」——--bw 由 JS 按状态
+     设置，hover 用 max() 保证展开宽度不被内联宽度压住 */
+  width: var(--bw, 64px); height: 26px;
   margin: 8px auto 0;
   position: relative;
   border-radius: 13px;
@@ -21,19 +23,27 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
   transition: width 220ms cubic-bezier(0.26, 1.2, 0.48, 1), box-shadow 200ms ease, border-color 200ms ease;
   overflow: hidden;
 }
-/* 太阳永远居中于胶囊（margin 居中随宽度过渡自动跟移，用户指定的样式） */
-#beacon .sun { position: absolute; left: 50%; top: 50%; margin: -7.5px 0 0 -7.5px; }
+/* 窄胶囊太阳居中；status 态（常显状态文字）太阳靠左、文字常亮 */
+#beacon .sun { position: absolute; left: 50%; top: 50%; margin: -7.5px 0 0 -7.5px; transition: left 220ms cubic-bezier(0.26, 1.2, 0.48, 1), transform 160ms cubic-bezier(0.26, 1.4, 0.48, 1); }
+#beacon.status .sun { left: 21px; }
 #beacon .label {
   position: absolute; left: calc(50% + 15px); top: 50%; transform: translateY(-50%) translateX(-6px);
   font-size: 11px; font-weight: 700; color: rgba(255, 232, 190, 1);
   white-space: nowrap; opacity: 0;
   transition: opacity 150ms ease 60ms, transform 150ms ease 60ms;
 }
+#beacon.status .label { left: 36px; opacity: 1; transform: translateY(-50%); transition: none; }
 #beacon:hover {
-  width: 118px;
+  width: max(var(--bw, 64px), 118px);
   border-color: rgba(255, 180, 80, 0.55);
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4), 0 0 14px rgba(255, 165, 60, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
+/* 今日清零：金边 + 静态柔光（呼吸类动画在该窗口会拖慢桌面合成，保持静态） */
+#beacon[data-state="done"] {
+  border-color: rgba(255, 205, 110, 0.8);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 12px rgba(255, 190, 80, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+#beacon[data-state="done"] .label { color: rgba(255, 236, 200, 1); }
 @media (prefers-color-scheme: dark) {
   #beacon .label { color: rgba(255, 225, 180, 1); }
   #beacon { background: rgba(24, 24, 30, 0.97); border-color: rgba(255, 170, 60, 0.5); }
